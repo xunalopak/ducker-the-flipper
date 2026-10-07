@@ -34,6 +34,9 @@ bool ttf_bt_init(TransTheFlipApp* app);
  */
 void ttf_bt_deinit(TransTheFlipApp* app);
 
+/** Restart the serial profile from the main thread, retaining bonded-device keys. */
+bool ttf_bt_restart(TransTheFlipApp* app);
+
 /**
  * @brief Envoie un message de statut au PC connecté via BLE TX.
  *        Utilisé pour confirmer la réception, l'envoi, ou signaler une annulation.

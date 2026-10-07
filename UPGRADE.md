@@ -1,5 +1,12 @@
 # Updating the PC client and Flipper app
 
+**New in v2.3.2:** Bluetooth recovery without removing pairing. The GUI adds
+**Repair link**, reconnects to a remembered device even when Windows no longer
+sees its advertisements, and prevents duplicate GUI instances. Hold **Down**
+in the updated Flipper app to restart Bluetooth when no typing is active.
+This cancels pending text; repair never resends or executes text automatically.
+Update both applications to use all recovery options.
+
 **New in v2.3.1:** TransTheFlip is now **DuckerTheFlipper**. The GUI, CLI,
 Flipper display name and release downloads use the new name. The README includes
 desktop screenshots. Protocol, saved settings and Flipper storage paths remain
@@ -46,6 +53,10 @@ Flipper app confirms its protocol version.
 
 ## PC software
 
+- **Repair link** closes/reopens the software Bluetooth session and verifies TTF1
+  without removing pairing or resending editor text. On Windows, a remembered
+  device can connect without a new advertising scan. Finish/cancel pending transfers first.
+
 - The last connected device is saved in `%LOCALAPPDATA%/TransTheFlip/settings.json`.
   On the next launch, Connect can reconnect without selecting the device again.
 - Diagnostics distinguish timeout, missing device, refused pairing, incompatible
@@ -64,6 +75,10 @@ Flipper app confirms its protocol version.
   memory and disappears on exit; only the device name and address are saved on disk.
 
 ## Flipper app
+
+- **Hold Down** to restart Bluetooth without deleting pairing keys or keyboard
+  layout. Pending reception/USB waiting is cancelled; restart is blocked while
+  typing or browsing history. Press Back to stop typing before recovery.
 
 - The header separately shows `BT:ON/OFF` and `USB:Ready/OFF`.
 - Before confirmation, Up/Down scrolls through the full text. Line breaks and

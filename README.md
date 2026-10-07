@@ -220,6 +220,28 @@ WaitingBT → Connected → TextReceived → WaitingUSB → Sending → Done →
 
 ## Troubleshooting
 
+### Recover a Bluetooth connection without pairing again
+
+Windows establishes the Bluetooth link; the GUI then opens its own GATT session.
+A device shown as connected in Windows is not necessarily ready in the GUI.
+
+1. Open DuckerTheFlipper on the Flipper and close other Bluetooth clients.
+   Keep only one GUI/CLI client connected: Windows may hide the serial service
+   from a second simultaneous client. The GUI prevents duplicate launches.
+2. Select your remembered Flipper in the GUI and click **Repair link**.
+   The GUI closes its session, reopens it and checks the TTF1 response. On Windows,
+   a known device address can be used without requiring the Flipper to advertise again.
+3. If it still fails, **hold Down** inside the Flipper app to restart Bluetooth,
+   then click **Repair link** again. This retains the bonded-device keys and keyboard layout.
+
+Repair never resends or executes the editor text. Finish or cancel a pending
+transfer before using GUI repair. Holding Down on the Flipper discards a pending
+receive/USB-wait operation; Bluetooth restart is blocked during HID typing and
+while browsing history. Use Back to stop typing first.
+
+For Python installations, update `pc_client/requirements.txt`: this recovery path
+requires **Bleak 3.0.2 or later**. The Windows executable bundles this dependency.
+
 | Problem | Solution |
 |---------|----------|
 | **Connected but no text received / no OK button** | **Flipper not paired.** Pair it via Windows Settings > Bluetooth & devices and confirm the code on the Flipper screen, then restart the client. |

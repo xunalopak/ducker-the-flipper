@@ -160,6 +160,13 @@ void ttf_bt_notify_ready(void) {
     ble_profile_serial_notify_buffer_is_empty(s_profile);
 }
 
+bool ttf_bt_restart(TransTheFlipApp* app) {
+    ttf_bt_deinit(app);
+    // Drop events from the old link while callbacks are stopped. No send thread is active.
+    furi_message_queue_reset(app->event_queue);
+    return ttf_bt_init(app);
+}
+
 void ttf_bt_on_connect(void) {
     if(!s_profile) return;
 

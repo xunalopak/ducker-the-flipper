@@ -559,6 +559,25 @@ int32_t trans_the_flip_app(void* p) {
 
             // --------------------------------------------------
             case EventTypeInput:
+                if(ev.input.key == InputKeyDown && ev.input.type == InputTypeLong &&
+                   !app->send_thread && app->state != AppStateSending &&
+                   app->state != AppStateHistory) {
+                    reset_text_buffer(app);
+                    app->bt_connected = false;
+                    app->state = AppStateWaitingBT;
+                    app->done_tick = 0;
+                    app->usb_detect_tick = 0;
+                    app->error_msg[0] = '\0';
+                    atomic_store(&app->rx_overflow, false);
+                    furi_mutex_release(app->mutex);
+                    bool restarted = ttf_bt_restart(app);
+                    furi_mutex_acquire(app->mutex, FuriWaitForever);
+                    if(!restarted) {
+                        app->state = AppStateError;
+                        strncpy(app->error_msg, "BLE restart failed", TTF_ERROR_MSG_SIZE - 1);
+                    }
+                    break;
+                }
                 if(ev.input.key == InputKeyBack && ev.input.type == InputTypePress &&
                    app->state == AppStateSending) {
                     ttf_hid_cancel();

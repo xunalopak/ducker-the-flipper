@@ -32,6 +32,7 @@ import queue
 import asyncio
 import threading
 import json
+import errno
 from PIL import Image
 from pathlib import Path
 from typing import Optional
@@ -47,6 +48,7 @@ except ImportError:
 try:
     from bleak import BleakScanner, BleakClient
     from bleak.backends.characteristic import BleakGATTCharacteristic
+    from bleak.backends.device import BLEDevice
 except ImportError:
     raise SystemExit("bleak is not installed. Run: pip install bleak")
 
@@ -60,6 +62,29 @@ from trans_client import (
 from protocol import EXECUTE_COMMAND, RX_UUID, NotificationLines, STATUS_TEXT, MAX_TEXT_BYTES, peer_capacity, encode_text, encode_layout, write_text, bluetooth_diagnostic
 
 SETTINGS_PATH = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "TransTheFlip" / "settings.json"
+
+
+def acquire_gui_lock(path=SETTINGS_PATH.with_name("gui.lock")):
+    """Keep the returned file open for the GUI lifetime; OS cleanup releases the lock."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = path.open("a+b")
+    if handle.tell() == 0:
+        handle.write(b"\0")
+        handle.flush()
+    handle.seek(0)
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        handle.close()
+        if exc.errno in (errno.EACCES, errno.EAGAIN):
+            raise RuntimeError("GUI already running") from None
+        raise
+    return handle
 
 
 def load_last_device(path=SETTINGS_PATH):
@@ -90,6 +115,11 @@ GUI_TEXT = {
         "connecting": "● Connecting...", "disconnecting": "● Disconnecting...",
         "connected": "● Connected: {name}", "scan": "Scan", "connect": "Connect",
         "disconnect": "Disconnect", "send": "Send", "execute": "Execute on Flipper",
+        "repair": "Repair link", "repairing": "● Repairing connection...",
+        "repair_log": "Reopening the Bluetooth session without removing pairing. Text is not resent.",
+        "repair_busy": "Finish or cancel the transfer on the Flipper before repairing the connection.",
+        "repair_hint": "If repair fails, hold Down in the Flipper app to restart Bluetooth, then retry. Pairing is kept.",
+        "already_open": "DuckerTheFlipper is already open. Use the existing window or close it before starting another copy.",
         "scan_first": "(scan first)", "no_devices": "(no devices)",
         "history": "Session history", "hint": "Up to {bytes} bytes · Enter: new line · Ctrl+Enter: send",
         "ready": "Ready. Click Scan to discover your Flipper Zero.",
@@ -118,8 +148,8 @@ GUI_TEXT = {
         "connecting_log": "🔗  Connecting to {name}...",
         "pairing": "Confirm the pairing code on the Flipper if prompted (up to 60s).",
         "device_not_found": "Device not found — scan again.",
-        "service_not_found": "Flipper serial service not found — open DuckerTheFlipper, close other Bluetooth clients, then reconnect.",
-        "protocol_timeout": "DuckerTheFlipper did not answer the TTF1 protocol. Install the latest Flipper app and open it.",
+        "service_not_found": "Bluetooth is connected, but the serial service is unavailable or occupied. Close other GUI/CLI copies and qFlipper, keep DuckerTheFlipper open on the Flipper, then retry.",
+        "protocol_timeout": "Bluetooth is connected, but DuckerTheFlipper did not answer. Open the app; if needed hold Down to restart Bluetooth, then retry.",
         "disconnected_setup": "Device disconnected during setup.", "disconnect_error": "⚠️  Disconnect error: {error}",
         "disconnected_log": "👋  Disconnected.", "already_waiting": "A transfer is already waiting for the Flipper result.",
         "send_error": "Transfer interrupted. The text is kept.", "receipt_timeout": "No receipt from the Flipper.",
@@ -133,6 +163,11 @@ GUI_TEXT = {
         "connecting": "● Connexion...", "disconnecting": "● Déconnexion...",
         "connected": "● Connecté : {name}", "scan": "Rechercher", "connect": "Connecter",
         "disconnect": "Déconnecter", "send": "Envoyer", "execute": "Exécuter sur le Flipper",
+        "repair": "Réparer", "repairing": "● Réparation de la connexion...",
+        "repair_log": "Réouverture de la session Bluetooth sans supprimer l’appairage. Le texte n’est pas renvoyé.",
+        "repair_busy": "Terminez ou annulez l’envoi sur le Flipper avant de réparer la connexion.",
+        "repair_hint": "Si la réparation échoue, maintenez Bas dans l’application Flipper pour relancer le Bluetooth, puis réessayez. L’appairage est conservé.",
+        "already_open": "DuckerTheFlipper est déjà ouvert. Utilisez la fenêtre existante ou fermez-la avant de lancer une autre copie.",
         "scan_first": "(lancer une recherche)", "no_devices": "(aucun appareil)",
         "history": "Historique de la session", "hint": "Jusqu’à {bytes} octets · Entrée : nouvelle ligne · Ctrl+Entrée : envoyer",
         "ready": "Prêt. Cliquez sur Rechercher pour détecter votre Flipper Zero.",
@@ -161,8 +196,8 @@ GUI_TEXT = {
         "connecting_log": "🔗  Connexion à {name}...",
         "pairing": "Confirmez le code d’appairage sur le Flipper si demandé (jusqu’à 60 s).",
         "device_not_found": "Appareil introuvable — relancez la recherche.",
-        "service_not_found": "Service série du Flipper introuvable — ouvrez DuckerTheFlipper, fermez les autres clients Bluetooth, puis reconnectez-vous.",
-        "protocol_timeout": "DuckerTheFlipper ne répond pas au protocole TTF1. Installez et ouvrez la dernière application Flipper.",
+        "service_not_found": "Le Bluetooth est connecté, mais le service série est indisponible ou occupé. Fermez les autres copies du GUI/CLI et qFlipper, laissez DuckerTheFlipper ouvert sur le Flipper, puis réessayez.",
+        "protocol_timeout": "Le Bluetooth est connecté, mais DuckerTheFlipper ne répond pas. Ouvrez l’application ; au besoin, maintenez Bas pour relancer le Bluetooth, puis réessayez.",
         "disconnected_setup": "L’appareil s’est déconnecté pendant la configuration.", "disconnect_error": "⚠️  Erreur de déconnexion : {error}",
         "disconnected_log": "👋  Déconnecté.", "already_waiting": "Un transfert attend déjà le résultat du Flipper.",
         "send_error": "Transfert interrompu. Le texte est conservé.", "receipt_timeout": "Aucun accusé de réception du Flipper.",
@@ -238,6 +273,7 @@ class BleWorker:
         self._client: Optional[BleakClient] = None
         self._devices = {}
         self._connect_task = None
+        self._repair_task = None
         self._send_task = None
         self._layout_task = None
         self._awaiting_result = False
@@ -268,6 +304,9 @@ class BleWorker:
 
     def disconnect(self) -> None:
         self._submit(self._disconnect())
+
+    def repair(self, address: str, name: str) -> None:
+        self._submit(self._repair(address, name))
 
     def send(self, text: str) -> None:
         self._submit(self._send(text))
@@ -330,6 +369,9 @@ class BleWorker:
         self._emit("scanning", False)
 
     async def _connect(self, address: str, name: str) -> None:
+        repair_task = getattr(self, "_repair_task", None)
+        if repair_task is not None and repair_task is not asyncio.current_task():
+            return
         if self._connect_task is not None or self._client is not None:
             return
         self._connect_task = asyncio.current_task()
@@ -337,6 +379,10 @@ class BleWorker:
         self._emit("log", ("i18n", "pairing", {}))
         try:
             device = self._devices.get(address)
+            if device is None and sys.platform == "win32":
+                # Bleak >= 3.0.2 resolves a BLEDevice address through Windows directly.
+                # A bonded/connected Flipper may no longer advertise for a scan.
+                device = BLEDevice(address, name, None)
             if device is None:
                 device = await BleakScanner.find_device_by_address(address, timeout=12.0)
                 if device is None:
@@ -364,8 +410,8 @@ class BleWorker:
             service_uuids = [s.uuid.lower() for s in client.services]
             if FLIPPER_SERVICE_UUID not in service_uuids:
                 raise RuntimeError(
-                    "Flipper serial service not found — open DuckerTheFlipper, "
-                    "close other Bluetooth clients, then reconnect."
+                    "Flipper serial service unavailable or occupied — close other GUI/CLI copies "
+                    "and qFlipper, keep DuckerTheFlipper open on the Flipper, then reconnect."
                 )
 
             await client.start_notify(
@@ -377,7 +423,7 @@ class BleWorker:
             try:
                 await asyncio.wait_for(self._ready.wait(), 5.0)
             except asyncio.TimeoutError:
-                raise RuntimeError("DuckerTheFlipper did not answer the TTF1 protocol. Install the latest Flipper app and open it.") from None
+                raise RuntimeError("DuckerTheFlipper did not answer the TTF1 protocol. Bluetooth is connected; open the app or hold Down to restart Bluetooth, then retry.") from None
             if self._receive_error:
                 raise RuntimeError(self._receive_error)
             if self._client is not client or not client.is_connected:
@@ -393,6 +439,11 @@ class BleWorker:
             self._connect_task = None
 
     async def _disconnect(self) -> None:
+        repair_task = getattr(self, "_repair_task", None)
+        if repair_task is not None and repair_task is not asyncio.current_task():
+            repair_task.cancel()
+            await asyncio.gather(repair_task, return_exceptions=True)
+            return
         task = self._connect_task
         if task is not None and task is not asyncio.current_task():
             task.cancel()
@@ -410,16 +461,44 @@ class BleWorker:
         if self._client is not None:
             client = self._client
             self._client = None
+            closing = asyncio.create_task(client.disconnect())
             try:
-                await client.disconnect()
+                await asyncio.shield(closing)
+            except asyncio.CancelledError:
+                await closing
+                raise
             except Exception as exc:  # noqa: BLE001
                 self._emit("log", ("i18n", "disconnect_error", {"error": str(exc)}))
             self._client = None
             self._emit("log", ("i18n", "disconnected_log", {}))
         self._emit("disconnected", None)
 
+    async def _repair(self, address: str, name: str) -> None:
+        if getattr(self, "_repair_task", None) is not None:
+            return
+        if (self._connect_task is not None or self._awaiting_result or
+                self._send_task is not None or self._layout_task is not None):
+            self._emit("repair_error", "busy")
+            self._emit("repairing", False)
+            return
+        self._repair_task = asyncio.current_task()
+        self._emit("repairing", True)
+        self._emit("log", ("i18n", "repair_log", {}))
+        try:
+            await self._disconnect()
+            self._devices.pop(address, None)
+            await self._connect(address, name)
+            if self._client is None:
+                self._emit("log", ("i18n", "repair_hint", {}))
+        finally:
+            self._repair_task = None
+            self._emit("repairing", False)
+
     async def _send(self, text: str) -> None:
         client = self._client
+        if getattr(self, "_repair_task", None) is not None:
+            self._emit("send_error", "Wait for connection repair before sending.")
+            return
         if getattr(self, "_layout_task", None) is not None:
             self._emit("send_error", "Wait for keyboard layout confirmation before sending.")
             return
@@ -453,6 +532,9 @@ class BleWorker:
 
     async def _execute(self) -> None:
         client = self._client
+        if getattr(self, "_repair_task", None) is not None:
+            self._emit("log", ("i18n", "repair_busy", {}))
+            return
         if client is None or not client.is_connected:
             self._emit("send_error", "Not connected. The text is kept.")
             return
@@ -470,6 +552,9 @@ class BleWorker:
 
     async def _set_layout(self, name: str) -> None:
         client = self._client
+        if getattr(self, "_repair_task", None) is not None:
+            self._emit("layout_error", "Wait for connection repair before changing the layout.")
+            return
         if client is None or not client.is_connected:
             self._emit("layout_error", "Not connected.")
             return
@@ -567,6 +652,8 @@ class App(ctk.CTk):
         self._dev_map: dict[str, str] = {}
         self._connected = False
         self._busy = False
+        self._repairing = False
+        self._scanning = False
         self._pending_text = None
         self._max_text_bytes = MAX_TEXT_BYTES
         self._transfer_stage = "idle"
@@ -619,6 +706,11 @@ class App(ctk.CTk):
         self.connection_heading.grid(row=0, column=0, sticky="w", padx=16, pady=(8, 0))
         self.status_label = ctk.CTkLabel(bar, text=self._tr("disconnected"), text_color="#e05555", anchor="e")
         self.status_label.grid(row=0, column=1, columnspan=3, sticky="e", padx=16)
+        self.status_label.grid_configure(column=2, columnspan=2)
+        self.repair_btn = ctk.CTkButton(bar, text=self._tr("repair"), width=100, height=24,
+                                        fg_color="transparent", hover_color="#364252",
+                                        command=self._on_repair_click)
+        self.repair_btn.grid(row=0, column=1, padx=4, pady=(8, 0))
         self.device_var = ctk.StringVar(value=self._tr("scan_first"))
         self.device_menu = ctk.CTkOptionMenu(bar, values=[self._tr("scan_first")], variable=self.device_var,
                                              width=210, **menu_style)
@@ -736,6 +828,8 @@ class App(ctk.CTk):
             "A transfer is already waiting for the Flipper result.": App._tr(self, "already_waiting"),
             "No text is waiting on the Flipper.": App._tr(self, "no_pending"),
             "Finish the current transfer before changing the layout.": "Terminez le transfert en cours avant de changer la disposition.",
+            "Wait for connection repair before sending.": "Attendez la fin de la réparation avant d’envoyer.",
+            "Wait for connection repair before changing the layout.": "Attendez la fin de la réparation avant de changer le clavier.",
             "ERR:LAYOUT": "Disposition introuvable sur le Flipper.",
             "ERR:PROTOCOL": "Le FAP ne prend pas en charge le changement de disposition.",
             "No layout confirmation from the Flipper.": "Aucune confirmation de disposition reçue du Flipper.",
@@ -755,7 +849,7 @@ class App(ctk.CTk):
             return App._tr(self, "execution_error", error=text.removeprefix("Execution failed: "))
         if text.startswith("Device not found"):
             return App._tr(self, "device_not_found")
-        if text.startswith("Flipper serial service not found"):
+        if text.startswith("Flipper serial service"):
             return App._tr(self, "service_not_found")
         if text.startswith("DuckerTheFlipper did not answer"):
             return App._tr(self, "protocol_timeout")
@@ -776,6 +870,7 @@ class App(ctk.CTk):
         self.scan_btn.configure(text=self._tr("scan"))
         self.connect_btn.configure(text=self._tr("connect"))
         self.disconnect_btn.configure(text=self._tr("disconnect"))
+        self.repair_btn.configure(text=self._tr("repair"))
         self.send_btn.configure(text=self._tr("send"))
         self.execute_btn.configure(text=self._tr("execute"))
         self.layout_label.configure(text=self._tr("layout"))
@@ -796,6 +891,8 @@ class App(ctk.CTk):
             self.device_var.set(self._tr("scan_first"))
         if self._connected:
             self._set_status(self._tr("connected", name=self._connected_name), "#55cc66")
+        elif self._repairing:
+            self._set_status(self._tr("repairing"), "#e0a955")
         elif self._busy:
             self._set_status(self._tr("connecting"), "#e0a955")
         else:
@@ -833,12 +930,16 @@ class App(ctk.CTk):
 
     # ---- button handlers ----
     def _on_scan(self) -> None:
+        if self._busy or self._repairing:
+            return
+        self.repair_btn.configure(state="disabled")
+        self._scanning = True
         self.scan_btn.configure(state="disabled")
         self.connect_btn.configure(state="disabled")
         self._worker.scan()
 
     def _on_connect_click(self) -> None:
-        if self._connected:
+        if self._connected or self._busy or self._repairing:
             return
         label = self.device_var.get()
         address = self._dev_map.get(label)
@@ -850,8 +951,23 @@ class App(ctk.CTk):
         self.device_menu.configure(state="disabled")
         self.disconnect_btn.configure(state="normal")
         self._busy = True
+        self.repair_btn.configure(state="disabled")
         self._set_status(self._tr("connecting"), "#e0a955")
         self._worker.connect(address, label)
+
+    def _on_repair_click(self) -> None:
+        if self._busy or self._repairing or self._scanning:
+            return
+        if self._pending_text is not None or self._layout_pending:
+            self._log(self._tr("repair_busy"))
+            return
+        label = self.device_var.get()
+        address = self._dev_map.get(label)
+        if not address:
+            self._log(self._tr("select_device"))
+            return
+        self._handle_event("repairing", True)
+        self._worker.repair(address, label)
 
     def _on_disconnect_click(self) -> None:
         self._connected = False
@@ -864,7 +980,8 @@ class App(ctk.CTk):
         self._worker.disconnect()
 
     def _on_send(self, _event=None) -> None:
-        if getattr(self, "_layout_pending", False):
+        if (getattr(self, "_layout_pending", False) or getattr(self, "_repairing", False) or
+                getattr(self, "_busy", False)):
             return "break"
         text = self.entry.get("1.0", "end-1c")
         if not text:
@@ -916,7 +1033,25 @@ class App(ctk.CTk):
         self.after(50, self._poll_events)
 
     def _handle_event(self, kind: str, payload: object) -> None:
-        if kind == "log":
+        if kind == "repairing":
+            self._repairing = bool(payload)
+            self._busy = self._repairing
+            if self._repairing:
+                self._set_status(self._tr("repairing"), "#e0a955")
+                self.send_btn.configure(state="disabled")
+                self.execute_btn.configure(state="disabled")
+                self.layout_menu.configure(state="disabled")
+            else:
+                available = self._connected and self._pending_text is None and not self._layout_pending
+                self.scan_btn.configure(state="disabled" if self._connected else "normal")
+                self.connect_btn.configure(state="disabled" if self._connected else "normal")
+                self.device_menu.configure(state="disabled" if self._connected else "normal")
+                self.disconnect_btn.configure(state="normal" if self._connected else "disabled")
+                self.send_btn.configure(state="normal" if available else "disabled")
+                self.layout_menu.configure(state="normal" if available else "disabled")
+        elif kind == "repair_error":
+            self._log(self._tr("repair_busy"))
+        elif kind == "log":
             if isinstance(payload, tuple) and len(payload) == 3 and payload[0] == "i18n":
                 self._log(App._tr(self, str(payload[1]), **payload[2]))
             else:
@@ -924,6 +1059,7 @@ class App(ctk.CTk):
         elif kind == "diagnostic":
             self._log(bluetooth_diagnostic(payload, getattr(self, "_language", "fr")))
         elif kind == "scanning":
+            self._scanning = bool(payload)
             if payload:
                 if not self._connected:
                     self._set_status(App._tr(self, "scanning"), "#e0a955")
@@ -953,6 +1089,7 @@ class App(ctk.CTk):
             self._set_status(App._tr(self, "connected", name=payload), "#55cc66")
             address = self._dev_map.get(str(payload))
             if address:
+                self._last_device = {"address": address, "name": str(payload)}
                 try:
                     save_last_device(address, str(payload))
                 except OSError as exc:
@@ -1032,8 +1169,24 @@ class App(ctk.CTk):
             if msg in ("OK", "CANCEL") or msg.startswith("ERR"):
                 self._finish_transfer(message)
 
+        if hasattr(self, "repair_btn"):
+            repairing = getattr(self, "_repairing", False)
+            self.repair_btn.configure(state="disabled" if repairing or self._busy or self._scanning else "normal")
+            if repairing:
+                self.scan_btn.configure(state="disabled")
+                self.connect_btn.configure(state="disabled")
+                self.device_menu.configure(state="disabled")
+                self.disconnect_btn.configure(state="normal")
+                self.send_btn.configure(state="disabled")
+                self.execute_btn.configure(state="disabled")
+                self.layout_menu.configure(state="disabled")
+
     def _populate_devices(self, devices: list) -> None:
         self._dev_map = {label: addr for (label, addr) in devices}
+        remembered = getattr(self, "_last_device", None)
+        if remembered and remembered["address"] not in self._dev_map.values():
+            # A scan must not hide a known device just because Windows already holds its link.
+            self._dev_map[remembered["name"]] = remembered["address"]
         labels = list(self._dev_map.keys())
         if labels:
             self.device_menu.configure(values=labels)
@@ -1063,7 +1216,14 @@ class App(ctk.CTk):
 def main() -> None:
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")
-    App().mainloop()
+    try:
+        lock = acquire_gui_lock()
+    except RuntimeError:
+        from tkinter import messagebox
+        messagebox.showwarning("DuckerTheFlipper", GUI_TEXT["fr"]["already_open"] + "\n\n" + GUI_TEXT["en"]["already_open"])
+        return
+    with lock:
+        App().mainloop()
 
 
 if __name__ == "__main__":

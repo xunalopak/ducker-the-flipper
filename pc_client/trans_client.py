@@ -257,8 +257,8 @@ async def main() -> None:
             # Verify that the Flipper serial service is present
             service_uuids = [s.uuid.lower() for s in client.services]
             if FLIPPER_SERVICE_UUID not in service_uuids:
-                print(f"⚠️   Flipper serial service not found ({FLIPPER_SERVICE_UUID})")
-                print("    Is the DuckerTheFlipper app running on the Flipper?")
+                print("⚠️   Bluetooth is connected, but the Flipper serial service is unavailable or occupied.")
+                print("    Close other GUI/CLI copies and qFlipper, keep DuckerTheFlipper open on the Flipper, then retry.")
                 return
 
             await interactive_loop(client)

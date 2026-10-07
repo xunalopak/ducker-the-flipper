@@ -104,7 +104,7 @@ static void draw_waiting_bt(Canvas* canvas, const char* layout, size_t history_c
                             AlignCenter, AlignCenter, "Waiting for BLE...");
     canvas_draw_str_aligned(canvas, SCREEN_W / 2, CONTENT_MID_Y + 2,
                             AlignCenter, AlignCenter,
-                            history_count ? "PC connect / Up:Log" : "Connect from PC");
+                            history_count ? "Hold D:BT / Up:Log" : "Hold Down: BT reset");
 
     draw_layout_line(canvas, layout);
 }
@@ -117,7 +117,7 @@ static void draw_connected(Canvas* canvas, const char* layout, size_t history_co
                             AlignCenter, AlignCenter, "BLE Connected!");
     canvas_draw_str_aligned(canvas, SCREEN_W / 2, CONTENT_MID_Y + 2,
                             AlignCenter, AlignCenter,
-                            history_count ? "Send text / Up:Log" : "Send text from client");
+                            history_count ? "Hold D:BT / Up:Log" : "Hold Down: BT reset");
 
     draw_layout_line(canvas, layout);
 }

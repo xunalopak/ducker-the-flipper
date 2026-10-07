@@ -7,10 +7,19 @@ from unittest.mock import Mock, AsyncMock, patch
 from types import SimpleNamespace
 
 from protocol import encode_text, encode_layout, NotificationLines, write_text, bluetooth_diagnostic, peer_capacity, MAX_TEXT_BYTES
-from trans_gui import App, load_last_device, save_last_device
+from trans_gui import App, acquire_gui_lock, load_last_device, save_last_device
 
 
 class ProtocolTests(unittest.IsolatedAsyncioTestCase):
+    def test_only_one_gui_and_lock_released_on_close(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "gui.lock"
+            with acquire_gui_lock(path):
+                with self.assertRaisesRegex(RuntimeError, "GUI already running"):
+                    acquire_gui_lock(path)
+            with acquire_gui_lock(path):
+                pass
+
     async def test_chunked_frame_and_validation(self):
         writes, progress = [], []
 

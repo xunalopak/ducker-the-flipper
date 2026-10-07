@@ -27,7 +27,7 @@ with patch.object(trans_gui, "BleWorker", return_value=Mock()), patch.object(
                         app._toggle_log()
                     app.update()
                     assert bool(app.log_box.winfo_ismapped()) == visible
-                    for widget in (app.logo_label, app.entry, app.send_btn, app.execute_btn, app.disconnect_btn,
+                    for widget in (app.logo_label, app.entry, app.send_btn, app.execute_btn, app.disconnect_btn, app.repair_btn,
                                    app.history_menu, app.layout_menu, app.progress_bar, app.log_toggle):
                         assert widget.winfo_ismapped(), (size, visible, widget)
                         right = widget.winfo_rootx() - app.winfo_rootx() + widget.winfo_width()
@@ -73,9 +73,31 @@ with patch.object(trans_gui, "BleWorker", return_value=Mock()), patch.object(
         app._on_language_change("English")
         assert app.send_btn.cget("text") == "Send"
         assert app.disconnect_btn.cget("text") == "Disconnect"
+        assert app.repair_btn.cget("text") == "Repair link"
         app._on_language_change("Français")
         assert app.send_btn.cget("text") == "Envoyer"
         assert app.disconnect_btn.cget("text") == "Déconnecter"
+        assert app.repair_btn.cget("text") == "Réparer"
+        app._last_device = {"name": "Demo Flipper", "address": "demo-address"}
+        app._populate_devices([])  # A non-advertising remembered Flipper remains selectable.
+        assert app._dev_map == {"Demo Flipper": "demo-address"}
+        app.device_var.set("Demo Flipper")
+        original_text = app.entry.get("1.0", "end-1c")
+        app._on_repair_click()
+        app._worker.repair.assert_called_once_with("demo-address", "Demo Flipper")
+        assert app.repair_btn.cget("state") == "disabled"
+        assert app.send_btn.cget("state") == "disabled"
+        app._on_send()  # Ctrl+Enter must also be blocked during repair.
+        app._handle_event("disconnected", None)
+        assert app.connect_btn.cget("state") == "disabled"
+        assert app.disconnect_btn.cget("state") == "normal"
+        app._handle_event("repairing", False)
+        assert app.repair_btn.cget("state") == "normal"
+        assert app.entry.get("1.0", "end-1c") == original_text
+        app._pending_text = "pending"
+        app._on_repair_click()
+        app._worker.repair.assert_called_once()
+        app._pending_text = None
         app._connected = True
         app._on_layout_change("AZERTY FR (fr-FR.kl)")
         app._worker.set_layout.assert_called_with("fr-FR.kl")
